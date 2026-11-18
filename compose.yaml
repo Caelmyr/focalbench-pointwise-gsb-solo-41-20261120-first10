@@ -1,0 +1,14 @@
+name: solo44-focalbench
+services:
+  workbench:
+    build: .
+    image: solo44-focalbench:1.0
+    network_mode: bridge
+    ports:
+      - "127.0.0.1:${FOCALBENCH_PORT:-18944}:18944"
+    volumes:
+      - focalbench-data:/data
+    init: true
+    restart: unless-stopped
+volumes:
+  focalbench-data:

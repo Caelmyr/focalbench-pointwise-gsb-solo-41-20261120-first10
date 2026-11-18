@@ -1,0 +1,5 @@
+.git
+.venv
+.local-data
+**/__pycache__
+runtime-data

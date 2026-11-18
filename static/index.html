@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FocalBench · Focus stack inspection</title>
+  <link rel="stylesheet" href="/static/bench.css">
+  <script type="module" src="/static/bench.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="FocalBench library"><span class="reticle" aria-hidden="true"></span>Focal<span>Bench</span></a>
+    <nav id="top-nav" aria-label="Workspace"></nav>
+    <div class="top-actions"><button type="button" data-action="show-library" class="quiet">Stack library</button><button type="button" data-action="new-stack" class="accent">New stack</button></div>
+  </header>
+  <main id="app" tabindex="-1"><p class="loading">Opening the local library…</p></main>
+  <dialog id="dialog" aria-labelledby="dialog-title">
+    <form id="dialog-form" novalidate>
+      <div class="dialog-head"><h2 id="dialog-title">Settings</h2><button type="button" data-action="close-dialog" aria-label="Close">×</button></div>
+      <div id="dialog-body"></div>
+      <p id="dialog-message" class="dialog-message" aria-live="polite"></p>
+      <div id="dialog-actions" class="dialog-actions"></div>
+    </form>
+  </dialog>
+  <div id="notification" role="status" aria-live="polite"></div>
+</body>
+</html>
