@@ -151,7 +151,7 @@ def _load_manifest(archive: zipfile.ZipFile) -> dict:
     return {
         "name": short_text(value.get("name"), "stack name"),
         "note": short_text(value.get("note", ""), "stack note", maximum=1200, allow_blank=True),
-        "demo": None if value.get("demo") is None else choice(value["demo"], "demo", ("circuit", "shim")),
+        "demo": None if value.get("demo") is None else choice(value["demo"], "demo", ("circuit", "shim", "plaque")),
         "settings": settings,
         "reference_slot": reference,
         "frames": frames,

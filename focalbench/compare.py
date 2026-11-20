@@ -3,13 +3,22 @@
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from scipy import ndimage
 
-from .alignment import AnalysisBox, Motion, warp
+from .alignment import (
+    ANCHOR_FULL, ANCHOR_TRANSLATION_ONLY, ANCHOR_UNALIGNED, AnalysisBox, Motion, warp,
+)
 from .fusion import covered_image, difference_overlay
 from .imaging import fit_size, linear_luminance, linear_to_srgb, percentile_summary, read_pixels
 from .models import Missing, Region, Unprocessable
+
+ANCHOR_COLOR = (137, 229, 234, 255)
+ANCHOR_STATE_TEXT = {
+    ANCHOR_FULL: "full solve",
+    ANCHOR_TRANSLATION_ONLY: "translation only — scale uncertain",
+    ANCHOR_UNALIGNED: "not aligned — insufficient anchor evidence",
+}
 
 
 @dataclass
@@ -23,6 +32,8 @@ class Pair:
     positions: tuple[float, float]
     transformed: bool
     unit: str
+    anchor: AnalysisBox | None = None
+    anchor_states: tuple[str | None, str | None] = (None, None)
 
     @property
     def shared(self) -> np.ndarray:
@@ -60,6 +71,12 @@ def pair_from_run(library, run: dict, first: str, second: str, *, registered: bo
     else:
         fixed = first_capture
         moved = second_capture
+    anchor = summary.get("anchor")
+    anchor_box = None
+    if anchor and registered:
+        anchor_box = AnalysisBox(
+            anchor["x"] - box.x, anchor["y"] - box.y, anchor["width"], anchor["height"],
+        )
     return Pair(
         box.slice(fixed.rgb), box.slice(moved.rgb),
         box.slice(fixed.support), box.slice(moved.support),
@@ -67,6 +84,8 @@ def pair_from_run(library, run: dict, first: str, second: str, *, registered: bo
         (first_pose["display_position"], other_pose["display_position"]),
         registered,
         summary["scale"]["rail_unit"],
+        anchor_box,
+        (first_pose["motion"].get("anchor_state"), other_pose["motion"].get("anchor_state")),
     )
 
 
@@ -113,6 +132,14 @@ def compare_metrics(pair: Pair, selection: Region | None) -> dict:
         "detail_correlation": _correlation(first_detail[valid], second_detail[valid]),
         "first_luminance": percentile_summary(first, valid),
         "second_luminance": percentile_summary(second, valid),
+        "anchor": None if pair.anchor is None or not pair.transformed else {
+            "bounds": pair.anchor.public(),
+            "states": list(pair.anchor_states),
+            "labels": [
+                None if state is None else ANCHOR_STATE_TEXT.get(state, state)
+                for state in pair.anchor_states
+            ],
+        },
     }
 
 
@@ -142,17 +169,42 @@ def _dual_panel(pair: Pair) -> Image.Image:
     second = covered_image(linear_to_srgb(pair.second_rgb), pair.second_support).convert("RGBA")
     first.thumbnail(size)
     second.thumbnail(size)
+    if pair.anchor is not None and pair.transformed:
+        scale_x = first.width / pair.first_support.shape[1]
+        scale_y = first.height / pair.first_support.shape[0]
+        box = pair.anchor
+        rectangle = (
+            box.x * scale_x, box.y * scale_y,
+            (box.x + box.width) * scale_x - 1, (box.y + box.height) * scale_y - 1,
+        )
+        for panel in (first, second):
+            ImageDraw.Draw(panel).rectangle(rectangle, outline=ANCHOR_COLOR, width=2)
     sheet = Image.new("RGBA", (first.width + second.width + 10, max(first.height, second.height)), (18, 21, 26, 255))
     sheet.alpha_composite(first, (0, 0))
-    sheet.alpha_composite(second, (first.width + 10, 0))
+    sheet.alpha_composite(second, (10 + first.width, 0))
     return sheet
+
+
+def _mark_anchor(image: Image.Image, pair: Pair) -> Image.Image:
+    if pair.anchor is None or not pair.transformed:
+        return image
+    marked = image.convert("RGBA")
+    overlay = Image.new("RGBA", marked.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    box = pair.anchor
+    draw.rectangle(
+        (box.x, box.y, box.x + box.width - 1, box.y + box.height - 1),
+        outline=ANCHOR_COLOR, width=2,
+    )
+    marked.alpha_composite(overlay)
+    return marked
 
 
 def render_pair(pair: Pair, mode: str, amount: float) -> Image.Image:
     if mode == "split":
-        return _split_image(pair, amount)
+        return _mark_anchor(_split_image(pair, amount), pair)
     if mode == "overlay":
-        return difference_overlay(linear_luminance(pair.first_rgb), linear_luminance(pair.second_rgb), pair.shared)
+        return _mark_anchor(difference_overlay(linear_luminance(pair.first_rgb), linear_luminance(pair.second_rgb), pair.shared), pair)
     if mode == "difference":
-        return _difference_image(pair, 1 + amount * 9)
+        return _mark_anchor(_difference_image(pair, 1 + amount * 9), pair)
     return _dual_panel(pair)

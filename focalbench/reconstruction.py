@@ -9,14 +9,17 @@ from pathlib import Path
 
 import numpy as np
 
-from .alignment import AnalysisBox, RailAlignment, output_viewport, overlap_summary
+from .alignment import (
+    ANCHOR_TRANSLATION_ONLY, ANCHOR_UNALIGNED, AnalysisBox, RailAlignment, output_viewport,
+    overlap_summary,
+)
 from .focus import FocusEvidence, analyze_peaks, frame_evidence, image_response, rail_statistics
 from .fusion import ProductImages, assemble_composite, output_images
 from .imaging import assert_compatible_dimensions, linear_luminance, processing_size, read_pixels
 from .models import RUN_ASSETS, Capacity, Conflict, RunSettings, Unprocessable, require_frame_count, storage_id
 from .surface import focus_surface_summary
 
-ALGORITHM_VERSION = "1.0"
+ALGORITHM_VERSION = "1.1"
 RESULT_LIMIT = 36
 RESULT_LAYERS = (
     "depth", "confidence", "selected", "alternate", "valid", "reliable", "interpolated", "contributors",
@@ -67,6 +70,14 @@ def selected_captures(snapshot: dict, settings: RunSettings):
     return captures, positions, reference
 
 
+def anchor_box(size: tuple[int, int], settings: RunSettings) -> AnalysisBox | None:
+    if settings.anchor is None:
+        return None
+    width, height = size
+    x, y, right, bottom = settings.anchor.pixels(width, height)
+    return AnalysisBox(x, y, right - x, bottom - y)
+
+
 def capture_stack(library, captures: list[dict], reference: int, settings: RunSettings, size: tuple[int, int]) -> StackPlanes:
     channels = len(captures)
     width, height = size
@@ -78,7 +89,7 @@ def capture_stack(library, captures: list[dict], reference: int, settings: RunSe
     reference_capture = read_pixels(library, captures[reference], size)
     if not reference_capture.support.any():
         raise Unprocessable("The selected reference has no opaque samples.")
-    aligner = RailAlignment(reference_capture, settings.registration)
+    aligner = RailAlignment(reference_capture, settings.registration, anchor_box(size, settings))
     for index, capture in enumerate(captures):
         pixels = reference_capture if index == reference else read_pixels(library, capture, size)
         if not pixels.support.any():
@@ -129,8 +140,16 @@ def run_warnings(coverage: dict, surface: dict, captures: list[dict], statistics
     if not statistics["uniform"]:
         warnings.append({"code": "nonuniform-positions", "detail": "This stack uses unequal rail steps."})
     for capture in captures:
-        warning = capture["motion"]["warning"]
-        if warning:
+        motion = capture["motion"]
+        state = motion.get("anchor_state")
+        if state == ANCHOR_UNALIGNED:
+            warnings.append({"code": "anchor-unaligned", "capture_id": capture["id"],
+                             "detail": f"{capture['name']}: anchor evidence is too weak; this frame is kept unaligned."})
+        elif state == ANCHOR_TRANSLATION_ONLY:
+            warnings.append({"code": "anchor-translation-only", "capture_id": capture["id"],
+                             "detail": f"{capture['name']}: only part of the engraving is visible; translation is kept and scale is uncertain."})
+        warning = motion["warning"]
+        if warning and state is None:
             warnings.append({"code": "alignment", "capture_id": capture["id"],
                              "detail": f"{capture['name']}: {warning}"})
     return warnings
@@ -154,6 +173,7 @@ def summarize_result(
     rows = source_rows(positions, captures, settings, frames, planes.motions, reference)
     stats = rail_statistics(positions)
     origin = captures[reference]
+    anchor = anchor_box(size, settings)
     return {
         "algorithm": ALGORITHM_VERSION,
         "project_name": snapshot["project_name"],
@@ -163,6 +183,7 @@ def summarize_result(
         "original_size": [origin["width"], origin["height"]],
         "processed_size": list(size),
         "crop": box.public(),
+        "anchor": None if anchor is None else anchor.public(),
         "settings": settings.public(),
         "scale": settings.public()["scale"],
         "capture_count": len(captures),

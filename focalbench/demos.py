@@ -9,7 +9,7 @@ from scipy import ndimage
 
 from .alignment import transform_layer
 from .imaging import frame_input
-from .models import CaptureScale, RunSettings
+from .models import CaptureScale, Region, RunSettings
 
 WIDTH, HEIGHT = 690, 462
 
@@ -33,6 +33,10 @@ DEMOS = {
     "shim": Demo(
         "shim", "Machined shim and gauge", "Brushed metal, a stepped shim and raised engraved studs.",
         "9 samples with measured breathing", (0, 22, 44, 67, 92, 118, 146, 175, 206), 98221, 6.5,
+    ),
+    "plaque": Demo(
+        "plaque", "Engraved serial plaque", "Stable engraved lettering, a drifting raised boss and end frames with a cropped field of view.",
+        "9 samples with an anchor region and partial end frames", (0, 26, 52, 78, 104, 130, 156, 182, 208), 77413, 7.4,
     ),
 }
 
@@ -217,6 +221,63 @@ def gauge_shim(demo: Demo) -> tuple[np.ndarray, np.ndarray]:
     return target.final(demo.seed, directional=True)
 
 
+def serial_plaque(demo: Demo) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Plaque with stable engraving, a drifting raised boss, and a field-of-view mask per frame slot."""
+    target = Target((58, 63, 69), 12)
+    target.rectangle((24, 26, WIDTH - 25, HEIGHT - 24), (96, 102, 108), 28, radius=20,
+                     outline=(150, 156, 161), width=4)
+    target.rectangle((46, 48, WIDTH - 47, HEIGHT - 46), (119, 124, 128), 34, radius=12,
+                     outline=(74, 80, 85), width=2)
+    for index in range(26):
+        x = 62 + index * 22
+        target.line(((x, 58), (x + 10, 58)), (139, 144, 148), 35, width=2)
+        target.line(((x, HEIGHT - 58), (x + 10, HEIGHT - 58)), (139, 144, 148), 35, width=2)
+    target.text((74, 88), "FB  SERIAL  0041-13", (48, 53, 57), 40, size=26)
+    target.text((76, 126), "ALLOY 6061  /  REV C", (62, 67, 71), 39, size=16)
+    target.text((76, 348), "INSPECTION PLATE  Q4", (62, 67, 71), 39, size=15)
+    for index, digit in enumerate("0123456789"):
+        target.text((84 + index * 52, 306), digit, (52, 57, 60), 41, size=17)
+    target.text((470, 92), "µm", (70, 75, 79), 36, size=15)
+    scene, depth = target.final(demo.seed, directional=True)
+    rng = np.random.default_rng(demo.seed + 51)
+    boss_x = WIDTH * 0.5 + np.linspace(-150, 150, len(demo.positions))
+    return scene, depth, np.asarray(boss_x, dtype=np.float32)
+
+
+def frame_field_mask(index: int, frame_count: int) -> np.ndarray:
+    """End frames lose part of the field of view; the last frame retains almost no anchor."""
+    y, x = coords()
+    cy = HEIGHT * 0.5
+    if index == 0:
+        inside = (x > 236) & (np.abs(y - cy) < HEIGHT * 0.46)
+    elif index == frame_count - 1:
+        inside = (x > WIDTH - 60) & (np.abs(y - cy) < HEIGHT * 0.40)
+    elif index == 1:
+        inside = (x > 118) & (np.abs(y - cy) < HEIGHT * 0.48)
+    elif index == frame_count - 2:
+        inside = (x < 214) & (np.abs(y - cy) < HEIGHT * 0.48)
+    else:
+        inside = np.ones((HEIGHT, WIDTH), dtype=bool)
+    return inside
+
+
+def composite_boss(scene: np.ndarray, depth: np.ndarray, center_x: float, rng) -> tuple[np.ndarray, np.ndarray]:
+    y, x = coords()
+    radius = 46
+    disk = (x - center_x) ** 2 + (y - 208.0) ** 2 <= radius ** 2
+    rim = ((x - center_x) ** 2 + (y - 208.0) ** 2 <= (radius + 5) ** 2) & ~disk
+    tone = 205 + rng.normal(0, 2.4, (HEIGHT, WIDTH))
+    highlight = 26 * np.exp(-(((x - center_x - 14) / 24) ** 2 + ((y - 194) / 20) ** 2))
+    boss = np.clip(tone + highlight, 0, 255)
+    output = scene.copy()
+    output[disk] = boss[disk, None]
+    output[rim] = np.maximum(output[rim], 168)
+    next_depth = depth.copy()
+    next_depth[disk] = 172
+    next_depth[rim] = 150
+    return output.astype(np.float32), next_depth
+
+
 def optically_blur(scene: np.ndarray, heights: np.ndarray, position: float) -> np.ndarray:
     distance = np.abs(heights - position)
     radii = (0.30, 0.82, 1.67, 2.80, 4.6, 7.0)
@@ -235,8 +296,11 @@ def optically_blur(scene: np.ndarray, heights: np.ndarray, position: float) -> n
     return output
 
 
-def encode_demo_capture(scene, heights, demo: Demo, index: int) -> bytes:
+def encode_demo_capture(scene, heights, demo: Demo, index: int, *, boss_path=None) -> bytes:
     position = demo.positions[index]
+    rng = np.random.default_rng(demo.seed + 183 * index)
+    if boss_path is not None:
+        scene, heights = composite_boss(scene, heights, float(boss_path[index]), rng)
     optically_sampled = optically_blur(scene, heights, position)
     middle = (len(demo.positions) - 1) / 2
     phase = index - middle
@@ -247,25 +311,42 @@ def encode_demo_capture(scene, heights, demo: Demo, index: int) -> bytes:
         transform_layer(optically_sampled[..., band], dx, dy, escala, order=1, cval=24)
         for band in range(3)
     ], axis=2)
-    rng = np.random.default_rng(demo.seed + 183 * index)
     lighting = 1 + 0.026 * np.sin(index * 0.91)
     moving = moving * lighting + rng.normal(0, 0.75, moving.shape)
     rgb = np.clip(moving, 0, 255).astype(np.uint8)
+    if boss_path is not None:
+        field = transform_layer(
+            frame_field_mask(index, len(demo.positions)).astype(np.float32),
+            dx, dy, escala, order=1, cval=0,
+        ) > 0.5
+        rgba = np.dstack([rgb, (field * 255).astype(np.uint8)])
+        image = Image.fromarray(rgba, mode="RGBA")
+    else:
+        image = Image.fromarray(rgb)
     buf = BytesIO()
-    Image.fromarray(rgb).save(buf, format="PNG", compress_level=4)
+    image.save(buf, format="PNG", compress_level=4)
     return buf.getvalue()
 
 
 def create_demo(library, demo_id: str, title: str) -> dict:
     demo = DEMOS[demo_id]
+    boss_path = None
     if demo.key == "circuit":
         texture, height = circuit_board(demo)
+    elif demo.key == "plaque":
+        texture, height, boss_path = serial_plaque(demo)
     else:
         texture, height = gauge_shim(demo)
     records = []
     for index, position in enumerate(demo.positions):
-        data = encode_demo_capture(texture, height, demo, index)
+        data = encode_demo_capture(texture, height, demo, index, boss_path=boss_path)
         record = frame_input(data, f"{demo.key}-{index + 1:02d}.png", position, library)
         records.append(record)
     scale = CaptureScale(pixel_um=demo.pixel_um, rail_unit="µm", rail_offset=0.0)
-    return library.new_project(title, RunSettings(scale=scale), demo=demo_id, captures=records)
+    settings = RunSettings(scale=scale)
+    if demo.key == "plaque":
+        settings = RunSettings(
+            scale=scale,
+            anchor=Region(left=0.05, top=0.14, right=0.62, bottom=0.34),
+        )
+    return library.new_project(title, settings, demo=demo_id, captures=records)

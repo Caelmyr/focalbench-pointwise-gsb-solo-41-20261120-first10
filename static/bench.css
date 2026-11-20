@@ -192,3 +192,14 @@ dialog form { padding:17px; }
   .bench-head { align-items:flex-start; }
   .bench-head h1 { margin-top:3px; }
 }
+
+.anchor-box {
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px 12px;
+  background:rgba(137,229,234,0.05);
+}
+.anchor-box h4 { margin:0 0 6px; font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:#89e5ea; }
+.anchor-summary { margin:6px 0; font-size:12.5px; }
+.anchor-report { margin-top:10px; }
+.anchor-report .table-scroll { margin-top:6px; }

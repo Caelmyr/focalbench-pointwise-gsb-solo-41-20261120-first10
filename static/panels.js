@@ -66,6 +66,7 @@ export function capturePanel(ui) {
 function settingsForm(ui) {
   const config=ui.stack.settings;
   const references=ui.stack.captures.filter(item=>item.included&&!item.archived).map(item=>[item.id,item.name+" ("+n(item.position)+")"]);
+  const anchor=config.anchor;
   return `<form id="settings-form" class="box stack">
     <h3>Reconstruction recipe</h3>
     ${select("Registration","registration",[["breathing","Translate and scale"],["translation","Translation only"],["none","Already aligned"]],config.registration)}
@@ -77,6 +78,12 @@ function settingsForm(ui) {
     ${field("Fusion strength","strength",config.strength,{type:"number",min:.1,max:1,step:.05})}
     <div class="field-row">${select("Rail unit","rail_unit",[["µm","µm"],["mm","mm"],["step","Stage steps"]],config.scale.rail_unit)}${field("Rail origin","rail_offset",config.scale.rail_offset,{type:"number",step:"any"})}</div>
     ${field("Reference pixel size (µm / px)","pixel_um",config.scale.pixel_um??"",{type:"number",step:"any",placeholder:"Uncalibrated"})}
+    <div class="anchor-box">
+      <h4>Alignment anchor</h4>
+      <p class="muted">Drag a rectangle on a reference capture first, then use it to constrain registration to stable engraving. Everything outside the anchor still keeps the full frame view.</p>
+      ${anchor?`<p class="anchor-summary">Anchor set · L ${n(anchor.left,3)} T ${n(anchor.top,3)} R ${n(anchor.right,3)} B ${n(anchor.bottom,3)}</p>`:"<p class=\"anchor-summary muted\">No anchor — registration uses the whole frame.</p>"}
+      <div class="row">${control("Use selection as anchor","set-anchor",{disabled:ui.selection.kind!=="area"})}${control("Clear anchor","clear-anchor",{disabled:!anchor})}</div>
+    </div>
     <button type="submit">Save recipe</button>
   </form>`;
 }
@@ -93,6 +100,7 @@ export function resultPanel(ui) {
   if (note==="measure") {
     content = `${box("Archived reconstruction",`
       ${stat("Reference",cfg.reference_name)}${stat("Viewport",cfg.settings.viewport==="shared"?"Shared coverage":"Reference image")}
+      ${stat("Alignment anchor",cfg.anchor?`${cfg.anchor.width} × ${cfg.anchor.height} px engraving region`:"Whole frame")}
       ${stat("XY scale",cfg.scale.pixel_um===null?"Uncalibrated":n(cfg.scale.pixel_um,4)+" µm / px")}
       ${stat("Rail origin",n(cfg.scale.rail_offset)+" "+cfg.scale.rail_unit)}
       ${stat("Reliable focus",percent(cfg.reliable_fraction))}
@@ -117,6 +125,13 @@ export function resultPanel(ui) {
   </div>${content??""}</aside>`;
 }
 
+function anchorStateLabel(state) {
+  if (state==="full") return "Full solve";
+  if (state==="translation-only") return "Translation only · scale uncertain";
+  if (state==="unaligned") return "Not aligned · mark this frame";
+  return "—";
+}
+
 function planePanel(ui) {
   const frames=ui.result.summary.captures;
   const unit=ui.result.summary.scale.rail_unit;
@@ -125,7 +140,7 @@ function planePanel(ui) {
     ${select("Display","view",[["highlight","Highlight reliable winners"],["registered","Aligned capture"],["mask","Winner mask"]],ui.planeView)}
     ${field("Minimum island pixels","minimum",ui.planeMinimum,{type:"number",min:1,step:1})}<button type="submit">Inspect plane</button>
   </form>`)}
-  ${box("Capture evidence",`${table(["Rail "+unit,"Shift","Zoom","Wins"],frames.map(item=>[n(item.display_position,2),n(item.motion.dx,1)+", "+n(item.motion.dy,1),n(item.motion.scale,4),percent(item.winner_fraction)]))}
+  ${box("Capture evidence",`${table(["Rail "+unit,"Shift","Zoom","Anchor","Wins"],frames.map(item=>[n(item.display_position,2),n(item.motion.dx,1)+", "+n(item.motion.dy,1),n(item.motion.scale,4),anchorStateLabel(item.motion.anchor_state),percent(item.winner_fraction)]))}
     ${link("Capture evidence CSV",pathFor(ui,"/captures.csv"))}`)}`;
 }
 

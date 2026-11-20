@@ -85,6 +85,7 @@ def _capture_rows(summary: dict):
             motion["dx"], motion["dy"], motion["scale"], motion["score"], motion["overlap"],
             item["valid_fraction"], item["median_response"], item["p95_response"],
             item["winner_count"], item["winner_fraction"], motion["warning"],
+            motion.get("anchor_state"), motion.get("anchor_coverage"),
         )
 
 
@@ -93,7 +94,7 @@ def capture_report(summary: dict) -> bytes:
         "plane", "capture_slot", "capture_id", "capture_filename", "rail_position", "display_position",
         "rail_unit", "reference", "shift_x_px", "shift_y_px", "zoom_scale", "alignment_score", "overlap",
         "usable_focus_fraction", "median_response", "p95_response", "reliable_winners",
-        "reliable_fraction", "warning",
+        "reliable_fraction", "warning", "anchor_state", "anchor_coverage",
     )
     return csv_bytes(fields, list(_capture_rows(summary)))
 

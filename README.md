@@ -16,11 +16,11 @@ With a local Python 3.11 or 3.12 environment, install `requirements.txt` and run
 
 ## First inspection
 
-1. Open **Soldered controller** or **Machined shim and gauge** from the library. Both are deterministic synthetic targets. The first contains unevenly spaced captures. The second has noticeable change of image scale along the rail.
+1. Open **Soldered controller**, **Machined shim and gauge** or **Engraved serial plaque** from the library. All are deterministic synthetic targets. The first contains unevenly spaced captures. The second has noticeable change of image scale along the rail. The plaque pairs stable engraved lettering with a raised boss that drifts across the frames, and its end frames crop away part of the field of view.
 2. Page through the **Capture queue**, use **Preflight** to check frame dimensions, support, rail positions and exposure, then open **Reconstruction** on the capture panel to pick the reference and recipe.
 3. Select **Reconstruct** and switch between **All-in-focus**, **Focus surface**, **Confidence**, **Reliable coverage**, **Winning plane** and **Frame overlap**. In the result, select **Point** and click a detail to see the focus response across captures.
 4. Select **Area** and drag a rectangle for a depth histogram and coverage readings. Select **Section** and click two endpoints for a depth profile. A section can be downloaded as CSV.
-5. Open **Planes** to display the reliable contributions from an individual capture. Open **Compare** to see a registered capture pair or compare two archived recipes with the same reference capture.
+5. Open **Planes** to display the reliable contributions from an individual capture. Open **Compare** to see a registered capture pair or compare two archived recipes with the same reference capture. The registered pair view outlines the alignment anchor.
 6. Use **Notebook** to annotate a point, section or area and save an inspection reading. The **Evidence ZIP** includes maps, metadata, capture evidence, annotations and requested section data.
 
 ## Capture and planning tools
@@ -34,6 +34,10 @@ With a local Python 3.11 or 3.12 environment, install `requirements.txt` and run
 ## Inspection measurements
 
 - Image alignment estimates bounded translation and optional isotropic breathing relative to a single capture. The shared-coverage crop is the largest uninterrupted rectangle covered by every included frame. The reference view shows where only part of the stack contributes.
+- An optional alignment anchor restricts registration to a stable region of the reference capture, such as engraved lettering, so a drifting raised feature elsewhere cannot pull the whole-frame solution off. Drag a rectangle on a capture and use **Use selection as anchor** in the recipe. The anchor only guides the transform: the output keeps the full reference viewport and every pixel the frames actually cover. Each capture records one of three anchor states:
+  - **full solve** — enough of the engraving is visible to estimate translation and scale together.
+  - **translation only** — only part of the anchor is visible. Translation is kept, scale is fixed at 1.0 and flagged as uncertain in the capture table, pair comparison and result warnings.
+  - **not aligned** — too little anchor evidence remains (for example an end frame cropped past the engraving). The frame is left untransformed and explicitly marked rather than guessing a motion.
 - Focus response comes from local detail and derivative energy in linear luminance. The surface uses rail position at the strongest response and can fit intermediate values between nearby, supported samples. Low-confidence areas, holes and rail-boundary peaks need inspection.
 - The rail origin is a display offset set manually or estimated from a selected datum patch. An XY scale is measured from a known image span or supplied as original-reference µm per pixel. Saved results preserve original settings, crop offsets and reference geometry.
 - A selected patch can be exported at native result resolution with RGB and confidence maps, a float depth TIFF and, for up to 32,000 pixels, a coordinate CSV. The standard unsigned 16-bit depth PNG uses code 0 for no data. Codes 1 through 65535 linearly encode the near-to-far values described in the archived manifest.

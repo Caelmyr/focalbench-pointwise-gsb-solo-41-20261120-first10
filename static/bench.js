@@ -8,7 +8,7 @@ const ui = {
   showArchived:false,expanded:false,busy:false,deficitKind:"both",deficitMinimum:80,
   plane:null,planeView:"highlight",planeMinimum:24,
   pair:{alignment:"registered",mode:"overlay",amount:.5},recipe:{view:"split",amount:.5},
-  schedule:null,paths:{},
+  schedule:null,paths:{},pendingAnchor:null,
 };
 const app = el("#app"), dialog=el("#dialog");
 let noticeTimer, observer, drag=null, modalSubmit=null, measuredRequest=0;
@@ -89,7 +89,7 @@ async function loadLibrary(update=true) {
 async function loadStack(id,result=null,update=true) {
   ui.tab="capture";ui.capture=null;ui.result=null;ui.override=null;
   ui.capturePanel="capture";ui.resultPanel="measure";ui.tool="inspect";
-  ui.showArchived=false;ui.schedule=null;ui.marks=[];ui.cards=[];
+  ui.showArchived=false;ui.schedule=null;ui.marks=[];ui.cards=[];ui.pendingAnchor=null;
   clearSelection();
   setProject(await api(`/api/stacks/${id}`));
   if (result) await loadResult(result,update);
@@ -271,6 +271,13 @@ function drawSelection() {
   }
   const rectangle=region=>[[region.left,region.top],[region.right,region.top],[region.right,region.bottom],[region.left,region.bottom]];
   for (const mark of ui.tab==="result"?ui.marks:[]) markup(mark.vertices,mark.kind,styles[mark.color],mark.label);
+  if (ui.tab==="result"&&ui.result?.summary?.anchor&&!ui.override) {
+    const anchor=ui.result.summary.anchor, {width,height}=ui.result.summary;
+    markup(rectangle({
+      left:anchor.x/width,top:anchor.y/height,
+      right:(anchor.x+anchor.width)/width,bottom:(anchor.y+anchor.height)/height,
+    }),"area",styles.cyan,"Anchor");
+  }
   const selection=ui.selection;
   if (selection.kind==="pin") markup([selection.point],"pin",styles.amber);
   if (selection.kind==="area") markup(rectangle(selection.region),"area",styles.amber);
@@ -400,6 +407,7 @@ function fillRunDefaults(form) {
     blend:form.get("blend"),viewport:form.get("viewport"),
     confidence_floor:form.get("confidence_floor"),edge_guard:form.get("edge_guard"),strength:form.get("strength"),
     scale:{rail_unit:form.get("rail_unit"),rail_offset:form.get("rail_offset"),pixel_um:form.get("pixel_um")||null},
+    anchor:ui.pendingAnchor??ui.stack.settings.anchor??null,
   };
 }
 function currentRegion() {
@@ -675,6 +683,16 @@ const buttonActions={
   "rail-log":railLogDialog,
   "schedule":planForm,
   "preflight":checkPreflight,
+  "set-anchor":()=>{
+    if (ui.selection.kind!=="area") { toast("Drag a rectangle on a capture before setting the anchor.",true);return; }
+    ui.pendingAnchor={...ui.selection.region};
+    render();toast("Anchor staged. Save the recipe to apply it to the next reconstruction.");
+  },
+  "clear-anchor":async ()=>{
+    ui.pendingAnchor=null;
+    await updateProject({settings:{...ui.stack.settings,anchor:null}});
+    toast("Alignment anchor cleared.");
+  },
   "contact-sheet":()=>{
     const suffix=ui.showArchived?"?archived=1":"";
     showDisplay(ui.paths.stack+"/contact.png"+suffix,"Capture contact sheet","Raw source proof","Open the image or download the proof");
@@ -763,8 +781,12 @@ async function showPair(form) {
   ui.pair=pairs;
   const first=report.first.name, second=report.second.name;
   showDisplay(ui.paths.result+"/pair.png?"+search(pairs),"Capture pair",pairs.alignment==="registered"?"Aligned capture positions":"Before alignment",first+" / "+second);
+  const anchorNotes=report.anchor?`<div class="anchor-report">
+      <p class="muted">Cyan rectangle marks the alignment anchor (${n(report.anchor.bounds.width)} × ${n(report.anchor.bounds.height)} px).</p>
+      ${table(["Capture","Anchor state"],[[first,report.anchor.labels[0]??"Reference frame"],[second,report.anchor.labels[1]??"Reference frame"]])}
+    </div>`:"";
   showReadout("Capture pair comparison",metrics([["Shared coverage",percent(report.coverage)],["Mean light difference",n(report.mean_difference,4)],
-    ["Detail correlation",n(report.detail_correlation,4)],["Rail positions",n(report.first.position)+" / "+n(report.second.position)+" "+report.unit]]));
+    ["Detail correlation",n(report.detail_correlation,4)],["Rail positions",n(report.first.position)+" / "+n(report.second.position)+" "+report.unit]])+anchorNotes);
 }
 
 async function showRecipe(form) {

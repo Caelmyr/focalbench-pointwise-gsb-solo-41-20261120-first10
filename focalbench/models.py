@@ -260,15 +260,17 @@ class RunSettings:
     confidence_floor: float = 0.16
     edge_guard: int = 3
     strength: float = 0.7
+    anchor: Region | None = None
 
     @classmethod
     def parse(cls, payload: Any):
         raw = object_value(payload, "settings")
         validate_keys(raw, {
             "registration", "reference_id", "score", "blend", "viewport",
-            "scale", "confidence_floor", "edge_guard", "strength",
+            "scale", "confidence_floor", "edge_guard", "strength", "anchor",
         }, "settings")
         reference = raw.get("reference_id")
+        anchor_payload = raw.get("anchor")
         return cls(
             registration=choice(
                 raw.get("registration", "breathing"), "registration",
@@ -282,6 +284,7 @@ class RunSettings:
             confidence_floor=number(raw.get("confidence_floor", 0.16), "confidence floor", 0, 0.95),
             edge_guard=integer(raw.get("edge_guard", 3), "edge guard", 0, 12),
             strength=number(raw.get("strength", 0.7), "fusion strength", 0.1, 1.0),
+            anchor=None if anchor_payload in (None, {}) else Region.parse(anchor_payload),
         )
 
     def public(self) -> dict:
